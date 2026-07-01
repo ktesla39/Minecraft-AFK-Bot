@@ -32,6 +32,7 @@ function createBot() {
   bot.once('spawn', () => {
     setTimeout(() => {
       bot.chat(`/login ${config.pass}`);
+      bot.chat("/sit");
       console.log(`✅ ${config.botUsername} is Ready!`);
     }, 3000);
   });
