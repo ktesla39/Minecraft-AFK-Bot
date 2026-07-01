@@ -1,66 +1,51 @@
 const mineflayer = require('mineflayer');
+const http = require('http');
 const config = require('./config.json');
 
-const bot = mineflayer.createBot({
-  host: config.serverHost,
-  port: config.serverPort,
-  username: config.botUsername,
-  auth: 'offline',
-  version: false,
-  viewDistance: config.botChunk
-});
-
-let movementPhase = 0;
-const STEP_INTERVAL = 1500;
-const STEP_SPEED    = 1;
-const JUMP_DURATION = 500;
-
-bot.on('spawn', () => {
-  setTimeout(() => {
-    bot.setControlState('sneak', true);
-    console.log(`✅ ${config.botUsername} is Ready!`);
-  }, 3000);
-
-  setTimeout(movementCycle, STEP_INTERVAL);
-});
-
-function movementCycle() {
-  if (!bot.entity) return;
-
-  switch (movementPhase) {
-    case 0:
-      bot.setControlState('forward', true);
-      bot.setControlState('back', false);
-      bot.setControlState('jump', false);
-      break;
-    case 1:
-      bot.setControlState('forward', false);
-      bot.setControlState('back', true);
-      bot.setControlState('jump', false);
-      break;
-    case 2:
-      bot.setControlState('forward', false);
-      bot.setControlState('back', false);
-      bot.setControlState('jump', true);
-      setTimeout(() => {
-        bot.setControlState('jump', false);
-      }, JUMP_DURATION);
-      break;
-    case 3:
-      bot.setControlState('forward', false);
-      bot.setControlState('back', false);
-      bot.setControlState('jump', false);
-      break;
-  }
-
-  movementPhase = (movementPhase + 1) % 4;
-
-  setTimeout(movementCycle, STEP_INTERVAL);
+// Validate config on startup
+if (!config.serverHost || config.serverHost === 'example.aternos.me') {
+  console.error('⚠️  Set a valid serverHost in config.json before running.');
+  process.exit(1);
 }
 
-bot.on('error', (err) => {
-  console.error('⚠️ Error:', err);
+const RECONNECT_DELAY = 20000;
+
+// Health-check server so the deployment platform can verify the process is alive
+const healthServer = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('OK');
 });
-bot.on('end', () => {
-  console.log('⛔️ Bot Disconnected!');
+healthServer.listen(8080, () => {
+  console.log('🌐 Health server listening on port 8080');
 });
+
+function createBot() {
+  const bot = mineflayer.createBot({
+    host: config.serverHost,
+    port: config.serverPort,
+    username: config.botUsername,
+    auth: 'offline',
+    version: false,
+    viewDistance: config.botChunk
+  });
+
+  bot.once('spawn', () => {
+    setTimeout(() => {
+      bot.chat(`/login ${config.pass}`);
+      console.log(`✅ ${config.botUsername} is Ready!`);
+    }, 3000);
+  });
+
+  bot.on('error', (err) => {
+    // Log a clean one-line message — no stack trace for known network errors
+    console.error(`⚠️  Error: ${err.message || err}`);
+  });
+
+  bot.on('end', (reason) => {
+    console.log(`⛔️ Bot Disconnected (${reason}). Reconnecting in ${RECONNECT_DELAY / 1000}s…`);
+    setTimeout(createBot, RECONNECT_DELAY);
+  });
+}
+
+createBot();
+
