@@ -1,15 +1,15 @@
 {
-  "name": "nuekkis-afk-bot",
+  "name": "mineflayer-dashboard",
   "version": "1.0.0",
-  "description": "An AFK bot that moves on-site to keep Aternos servers open 24/7. Not only for Aternos but also applies for different services.",
-  "main": "bot.js",
+  "description": "Self-healing Mineflayer AFK bot with a real-time web dashboard for status, chat, logs, and remote control.",
+  "main": "index.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
-  "author": "nuekkis",
-  "license": "MIT",
   "dependencies": {
-    "mineflayer": "^4.29.0"
+    "express": "^4.21.2",
+    "mineflayer": "^4.20.1",
+    "minecraft-protocol": "^1.47.0",
+    "socket.io": "^4.8.1"
   }
 }
-  

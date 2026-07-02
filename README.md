@@ -1,109 +1,56 @@
-<!-- Last updated: 2025-08-21T17:25:27Z -->
-# 🤖 Minecraft AFK Bot (Mineflayer-Based)
+# Mineflayer Dashboard
 
-This is a lightweight Minecraft Java AFK Bot powered by [Mineflayer](https://github.com/PrismarineJS/mineflayer). It connects to a Java server, performs basic movements to avoid AFK detection, and can be customized via a simple configuration file.
+A self-healing Minecraft AFK bot (built on [mineflayer](https://github.com/PrismarineJS/mineflayer)) with a real-time web dashboard for monitoring and remote control.
 
----
-
-# ⭐ Star this project, fork and use!
-
----
-
-## ⚠️ Warning Before You Begin
-
-- Before starting the bot, please make sure that the Offline Mode (Pirated/Not Original) option in the settings section of your Aternos server is active.
-
-- Secure the bot to protect it from monsters in the game.
-
----
-
-## ✨ Features
-
-* Connect to Minecraft Java servers (IP + port)
-* Customize bot username
-* Control chunk loading and memory usage
-* Periodic chunk pruning to reduce resource usage
-* Auto-movement behavior: step forward/backward, jump, sneak, loop
-* Easy configuration via `config.json`
-
----
-
-## ⚡ Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/nuekkis/Minecraft-AFK-Bot.git
-cd Minecraft-AFK-Bot
-```
-
-### 2. Install dependencies
+## Setup
 
 ```bash
 npm install
 ```
 
-### 3. Configure `config.json`
+Edit `config.json`:
 
 ```json
 {
-  "serverHost": "yourserver.aternos.me",
+  "serverHost": "example.aternos.me",
   "serverPort": 25565,
-  "botUsername": "MyBotName",
+  "botUsername": "AFKBot",
+  "pass": "password",
   "botChunk": 4
 }
 ```
 
-> ⚠️ Make sure the server is in offline mode if you're not using premium accounts.
+`pass` is only used for online-mode authentication and is never written to logs, the dashboard, or the `/api/state` endpoint.
 
----
-
-## 🤖 Starting the Bot
+Run it:
 
 ```bash
-node bot.js
+npm start
 ```
 
-On successful connection:
+Then open `http://localhost:8080` (or `PORT=xxxx npm start` to pick a different port).
 
-* You'll see `✅ BotName is Ready!` in the console
-* After 5 seconds, all loaded chunks are cleared
-* Every 20 seconds, any chunks beyond a 6-chunk radius will be removed
+## Reconnect behavior
 
----
+The bot reconnects indefinitely by default, following this loop after any disconnect or failed connection attempt:
 
-## ⚙️ Configuration Options (`config.json`)
+1. Wait 10 seconds.
+2. Ping the server every 20 seconds until it responds.
+3. As soon as a ping succeeds, attempt to reconnect the bot.
+4. Repeat forever, unless **Stop** is pressed on the dashboard.
 
-| Key            | Description                                |
-| -------------- | ------------------------------------------ |
-| `serverHost`         | IP or domain of your Minecraft server      |
-| `serverPort`         | Server port (default is 25565)             |
-| `botUsername`     | The bot's visible name in-game             |
-| `botChunk` | Radius of loaded chunks (recommended: 1–6) |
+The **Reconnect** button skips the wait/ping loop and retries immediately. **Stop** cancels all pending timers and disables auto-reconnect until **Start** is pressed again — none of these controls require restarting the Node process.
 
----
+## Dashboard features
 
-## ⚠️ Notes
+- Live status (stopped / connecting / waiting for server / online), with connection uptime
+- Players online, bot ping, memory usage, reconnect attempt count, and server MOTD
+- Console, Chat, and Errors tabs with filtering, timestamps, and auto-scroll
+- Connection history timeline (connects, disconnects, kicks, manual actions)
+- Chat box to send messages to the server as the bot
+- Responsive layout for desktop and mobile
 
-* **Skins**: Skins might not appear properly if the server is in offline mode.
-* **Sneak Movement**: The bot uses `setControlState('sneak', true)`, but some servers may block or ignore this action.
-* **AFK Prevention**: The bot periodically moves, sneaks, and jumps to prevent disconnection due to inactivity.
+## Notes
 
----
-
-## 📚 Resources & Contributions
-
-* [Mineflayer Docs](https://mineflayer.prismarine.js.org/)
-* [PrismarineJS GitHub](https://github.com/PrismarineJS/)
-
-Feel free to contribute by opening a pull request or submitting an issue.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
-
-Get started now and keep your server active with a smart, customizable bot! ⛏️
+- State is kept in memory (last 500 log/chat/history entries) and reset on process restart.
+- `GET /api/state` returns the same data the dashboard shows, for scripting or external monitoring.

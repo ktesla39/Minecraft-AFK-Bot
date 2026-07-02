@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mineflayer Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="signal" id="signal" data-state="stopped" aria-hidden="true">
+        <span class="cell"></span><span class="cell"></span><span class="cell"></span>
+        <span class="cell"></span><span class="cell"></span><span class="cell"></span>
+        <span class="cell"></span><span class="cell"></span><span class="cell"></span>
+      </div>
+      <div class="brand-text">
+        <h1>Mineflayer<span>Dashboard</span></h1>
+        <div class="server-label" id="serverLabel">connecting…</div>
+      </div>
+    </div>
+
+    <div class="topbar-status">
+      <span class="status-pill" id="statusPill" data-state="stopped">Stopped</span>
+      <span class="uptime" id="uptime">—</span>
+    </div>
+
+    <div class="topbar-controls">
+      <button class="btn btn-start" id="btnStart" type="button">Start</button>
+      <button class="btn btn-stop" id="btnStop" type="button">Stop</button>
+      <button class="btn btn-reconnect" id="btnReconnect" type="button">Reconnect</button>
+    </div>
+  </header>
+
+  <section class="stats-strip" id="statsStrip">
+    <div class="stat-card">
+      <span class="stat-label">Players online</span>
+      <span class="stat-value" id="statPlayers">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Ping</span>
+      <span class="stat-value" id="statPing">—</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Uptime</span>
+      <span class="stat-value" id="statUptime">—</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Memory</span>
+      <span class="stat-value" id="statMemory">—</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Reconnect attempts</span>
+      <span class="stat-value" id="statReconnects">0</span>
+    </div>
+    <div class="stat-card stat-card--wide">
+      <span class="stat-label">Server MOTD</span>
+      <span class="stat-value stat-value--motd" id="statMotd">—</span>
+    </div>
+  </section>
+
+  <main class="main-grid">
+
+    <section class="panel panel-console">
+      <div class="panel-head">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="console" role="tab" aria-selected="true">Console</button>
+          <button class="tab" data-tab="chat" role="tab" aria-selected="false">Chat</button>
+          <button class="tab" data-tab="errors" role="tab" aria-selected="false">Errors <span class="tab-badge" id="errorBadge" hidden>0</span></button>
+        </div>
+        <div class="panel-toolbar">
+          <input type="search" id="filterInput" class="filter-input" placeholder="Filter log…" aria-label="Filter log">
+          <label class="autoscroll-toggle">
+            <input type="checkbox" id="autoscrollToggle" checked>
+            Auto-scroll
+          </label>
+        </div>
+      </div>
+
+      <div class="log-view" id="consoleView" data-view="console"></div>
+      <div class="log-view" id="chatView" data-view="chat" hidden></div>
+      <div class="log-view" id="errorsView" data-view="errors" hidden></div>
+
+      <form class="chat-input" id="chatForm" hidden>
+        <input type="text" id="chatInput" placeholder="Message the server…" maxlength="256" autocomplete="off">
+        <button class="btn btn-send" type="submit">Send</button>
+      </form>
+    </section>
+
+    <aside class="panel panel-history">
+      <div class="panel-head panel-head--simple">
+        <h2>Connection history</h2>
+      </div>
+      <div class="log-view" id="historyView" data-view="history"></div>
+    </aside>
+
+  </main>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
