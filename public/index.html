@@ -97,12 +97,33 @@
         <h2>Connection history</h2>
       </div>
       <div class="log-view" id="historyView" data-view="history"></div>
+      <div class="account-panel">
+        <div class="account-panel__head">
+          <h3>Accounts</h3>
+        </div>
+        <div class="account-panel__body">
+          <label class="account-field">
+            <span>Active bot</span>
+            <select id="accountSelect"></select>
+          </label>
+          <div class="account-actions">
+            <button class="btn" id="btnSwitchAccount" type="button">Switch</button>
+          </div>
+          <form id="accountForm" class="account-form">
+            <input id="accountDisplayNameInput" type="text" placeholder="Display name" autocomplete="off">
+            <input id="accountUsernameInput" type="text" placeholder="Minecraft username" autocomplete="off" required>
+            <input id="accountPasswordInput" type="text" placeholder="Password / login password" autocomplete="off">
+            <button class="btn btn-send" type="submit">Save</button>
+          </form>
+          <div id="accountList" class="account-list"></div>
+        </div>
+      </div>
     </aside>
 
   </main>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

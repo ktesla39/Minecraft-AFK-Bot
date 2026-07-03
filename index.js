@@ -7,12 +7,14 @@
 
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const { Server } = require('socket.io');
 const mineflayer = require('mineflayer');
 const mcProtocol = require('minecraft-protocol');
 const path = require('path');
 
 const config = require('./config.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
 
 // ---------------------------------------------------------------------------
 // Config / constants
@@ -28,12 +30,100 @@ const MAX_HISTORY_ENTRIES = 200;
 
 // Fields from config.json that are safe to expose to the dashboard/client.
 // Anything not in this list (passwords, tokens, etc.) is never sent or logged.
-const SAFE_CONFIG_FIELDS = ['serverHost', 'serverPort', 'botUsername', 'botChunk'];
+const SAFE_CONFIG_FIELDS = ['serverHost', 'serverPort', 'botChunk', 'selectedAccount'];
+
+function ensureConfigShape() {
+  if (!Array.isArray(config.accounts)) config.accounts = [];
+  config.accounts = config.accounts
+    .filter(Boolean)
+    .map((account) => {
+      const username = String(account.username || account.name || '').trim();
+      const displayName = String(account.displayName || account.name || username).trim();
+      const password = String(account.password || account.pass || '').trim();
+      return { username, password, displayName: displayName || username };
+    })
+    .filter((account) => account.username);
+
+  if (!config.selectedAccount && config.accounts[0]) {
+    config.selectedAccount = config.accounts[0].username;
+  }
+
+  if (!config.accounts.length) {
+    const fallback = { username: 'DontCare', password: '', displayName: 'Default' };
+    config.accounts.push(fallback);
+    config.selectedAccount = fallback.username;
+  }
+}
+
+function persistConfig() {
+  ensureConfigShape();
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function getAccountSummaries() {
+  ensureConfigShape();
+  return config.accounts.map((account) => ({
+    username: account.username,
+    displayName: account.displayName || account.username,
+    isActive: account.username === config.selectedAccount,
+  }));
+}
+
+function findAccount(username) {
+  ensureConfigShape();
+  const normalized = String(username || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return config.accounts.find((account) => String(account.username || '').trim().toLowerCase() === normalized) || null;
+}
+
+function resolveActiveAccount(requestedUsername) {
+  ensureConfigShape();
+  const explicit = requestedUsername ? findAccount(requestedUsername) : null;
+  if (explicit) {
+    config.selectedAccount = explicit.username;
+    persistConfig();
+    return explicit;
+  }
+
+  const selected = findAccount(config.selectedAccount) || config.accounts[0] || null;
+  if (selected) {
+    config.selectedAccount = selected.username;
+    persistConfig();
+  }
+  return selected;
+}
+
+function setSelectedAccount(username) {
+  ensureConfigShape();
+  const account = findAccount(username);
+  if (!account) return null;
+  config.selectedAccount = account.username;
+  persistConfig();
+  return account;
+}
 
 function safeConfig() {
+  ensureConfigShape();
   const out = {};
   for (const field of SAFE_CONFIG_FIELDS) out[field] = config[field];
+  out.accounts = getAccountSummaries();
   return out;
+}
+
+function parseCliArgs(argv) {
+  const result = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--user' || arg === '--username') {
+      result.username = argv[i + 1] || null;
+      i += 1;
+    } else if (arg.startsWith('--user=')) {
+      result.username = arg.split('=').slice(1).join('=');
+    } else if (arg.startsWith('--username=')) {
+      result.username = arg.split('=').slice(1).join('=');
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +157,7 @@ let retryTimer = null;
 let pingTimer = null;
 let statsTimer = null;
 let pingProbeInFlight = false;
+let activeAccount = null;
 
 const logs = [];      // general console/event log
 const chat = [];       // server chat messages
@@ -101,8 +192,57 @@ function logError(message, err) {
   log(`${message}${detail ? ': ' + detail : ''}`, 'error');
 }
 
+function normalizeUsername(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'object') {
+    return value.username || value.name || value.displayName || value.nick || value.text || null;
+  }
+  const text = String(value).trim();
+  return text || null;
+}
+
+function looksLikeUuid(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.replace(/-/g, '');
+  return /^[0-9a-f]{32}$/i.test(normalized);
+}
+
+function resolveUsername(sender, fallbackMessage) {
+  const direct = normalizeUsername(sender);
+  if (direct && !looksLikeUuid(direct)) return direct;
+
+  if (sender && typeof sender === 'object' && bot) {
+    const uuid = sender.uuid || sender.id || sender.playerUUID;
+    if (uuid) {
+      const match = Object.values(bot.players || {}).find((player) => {
+        const playerUuid = player && (player.uuid || player.id || player.uuidRaw);
+        if (!playerUuid) return false;
+        return String(playerUuid).replace(/-/g, '') === String(uuid).replace(/-/g, '');
+      });
+      if (match && match.username) return match.username;
+    }
+  }
+
+  if (bot && looksLikeUuid(direct)) {
+    const match = Object.values(bot.players || {}).find((player) => {
+      const playerUuid = player && (player.uuid || player.id || player.uuidRaw);
+      if (!playerUuid) return false;
+      return String(playerUuid).replace(/-/g, '') === direct.replace(/-/g, '');
+    });
+    if (match && match.username) return match.username;
+  }
+
+  if (typeof fallbackMessage === 'string') {
+    const match = fallbackMessage.match(/^(?:<([^>]+)>|(?:\[(.*?)\]\s*)?([A-Za-z0-9_]{1,16})\s?[>:\-»\]\)~]+\s)(.*)$/);
+    if (match && (match[1] || match[3])) return match[1] || match[3];
+  }
+
+  return direct;
+}
+
 function logChat(username, message) {
-  const entry = { time: nowIso(), username: username || null, message };
+  const entry = { time: nowIso(), username: resolveUsername(username, message), message };
   pushCapped(chat, entry, MAX_CHAT_ENTRIES);
   io.emit('chat', entry);
 }
@@ -220,31 +360,57 @@ function motdToString(description) {
 // Bot lifecycle
 // ---------------------------------------------------------------------------
 
+function disconnectBot(reason = 'disconnect') {
+  if (!bot) return;
+
+  const currentBot = bot;
+  bot = null;
+
+  try {
+    if (typeof currentBot.end === 'function') {
+      currentBot.end(reason);
+    } else if (typeof currentBot.quit === 'function') {
+      currentBot.quit(reason);
+    } else if (currentBot._client && typeof currentBot._client.end === 'function') {
+      currentBot._client.end(reason);
+    } else {
+      throw new Error('No disconnect method available for this bot instance.');
+    }
+  } catch (err) {
+    logError('Error while stopping bot', err);
+  }
+}
+
 function connectBot() {
   if (bot) return; // already connecting/connected
   clearAllTimers();
   setStatus('connecting');
   state.reconnectAttempts += 1;
-  logHistory('connect-attempt', `Attempt #${state.reconnectAttempts}`);
-  log(`Connecting to ${config.serverHost}:${config.serverPort} as ${config.botUsername}...`);
+
+  activeAccount = resolveActiveAccount();
+  if (!activeAccount) {
+    logError('No bot account is configured. Add one from the dashboard or config.json.', new Error('missing-account'));
+    state.autoReconnect = false;
+    setStatus('stopped');
+    return;
+  }
+
+  logHistory('connect-attempt', `Attempt #${state.reconnectAttempts} for ${activeAccount.username}`);
+  log(`Connecting to ${config.serverHost}:${config.serverPort} as ${activeAccount.username}...`);
 
   try {
-    bot = mineflayer.createBot({
+    const createdBot = mineflayer.createBot({
       host: config.serverHost,
       port: config.serverPort,
-      username: config.botUsername,
-      // NOTE: password intentionally omitted from every log line/emit above.
-      password: config.pass || undefined,
+      username: activeAccount.username,
+      password: activeAccount.password || undefined,
       auth: 'offline',
       version: false,
       viewDistance: config.botChunk,
-      // We do our own structured logging (with password redaction) below,
-      // so silence mineflayer's built-in console output to avoid duplicate/
-      // unstructured noise and any chance of it dumping raw connection
-      // details into the terminal.
       hideErrors: true,
       logErrors: false,
     });
+    bot = createdBot;
   } catch (err) {
     bot = null;
     logError('Failed to create bot', err);
@@ -252,28 +418,38 @@ function connectBot() {
     return;
   }
 
-  bot.on('spawn', () => {
+  const currentBot = bot;
+
+  currentBot.on('spawn', () => {
     state.connectedAt = Date.now();
     state.reconnectAttempts = 0;
-    state.players = Object.keys(bot.players).filter((p) => p !== bot.username);
+    state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
     setStatus('online');
     log('Bot spawned and is now online.');
-    logHistory('online', `Connected as ${config.botUsername}`);
+    logHistory('online', `Connected as ${activeAccount.displayName || activeAccount.username}`);
+
+    if (activeAccount && activeAccount.password) {
+      currentBot.chat(`/login ${activeAccount.password}`);
+      log(`Sent login command for ${activeAccount.username}.`);
+    }
   });
 
-  bot.on('messagestr', (message) => {
-    logChat(null, message);
+  currentBot.on('messagestr', (message, position, _jsonMsg, sender) => {
+    if (!message) return;
+    if (position === 'chat' || sender) {
+      logChat(sender, message);
+    }
   });
 
-  bot.on('playerJoined', (player) => {
-    if (bot) state.players = Object.keys(bot.players).filter((p) => p !== bot.username);
+  currentBot.on('playerJoined', () => {
+    if (bot === currentBot) state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
   });
 
-  bot.on('playerLeft', () => {
-    if (bot) state.players = Object.keys(bot.players).filter((p) => p !== bot.username);
+  currentBot.on('playerLeft', () => {
+    if (bot === currentBot) state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
   });
 
-  bot.on('kicked', (reason) => {
+  currentBot.on('kicked', (reason) => {
     let reasonText;
     try {
       const parsed = typeof reason === 'string' ? JSON.parse(reason) : reason;
@@ -285,11 +461,12 @@ function connectBot() {
     logHistory('kicked', reasonText);
   });
 
-  bot.on('error', (err) => {
+  currentBot.on('error', (err) => {
     logError('Bot connection error', err);
   });
 
-  bot.on('end', (reason) => {
+  currentBot.on('end', (reason) => {
+    if (bot !== currentBot) return;
     const wasOnline = state.status === 'online';
     bot = null;
     state.connectedAt = null;
@@ -322,8 +499,7 @@ function stopBot() {
   logHistory('stop', 'Stop requested by user');
   if (bot) {
     log('Stopping bot...');
-    try { bot.quit(); } catch (err) { logError('Error while stopping bot', err); }
-    bot = null;
+    disconnectBot('stop requested');
   } else {
     setStatus('stopped');
   }
@@ -332,14 +508,33 @@ function stopBot() {
   state.ping = null;
 }
 
+function switchAccount(username) {
+  const account = setSelectedAccount(username);
+  if (!account) {
+    logError('Unable to switch account', new Error(`Unknown account: ${username}`));
+    return null;
+  }
+
+  logHistory('account-switch', `Selected account ${account.username}`);
+  if (bot) {
+    const shouldAutoReconnect = state.autoReconnect;
+    stopBot();
+    state.autoReconnect = shouldAutoReconnect;
+    connectBot();
+  } else {
+    state.autoReconnect = true;
+    connectBot();
+  }
+
+  return account;
+}
+
 function reconnectBot() {
   logHistory('manual-reconnect', 'Reconnect requested by user');
   clearAllTimers();
   state.autoReconnect = true;
   if (bot) {
-    const oldBot = bot;
-    bot = null;
-    try { oldBot.quit(); } catch (err) { /* already closing */ }
+    disconnectBot('reconnect requested');
   }
   log('Manual reconnect requested. Reconnecting now...');
   connectBot();
@@ -378,13 +573,23 @@ io.on('connection', (socket) => {
     chat,
     errors,
     history,
+    accounts: {
+      accounts: getAccountSummaries(),
+      selectedAccount: config.selectedAccount,
+    },
+  });
+
+  socket.emit('accounts', {
+    accounts: getAccountSummaries(),
+    selectedAccount: config.selectedAccount,
   });
 
   socket.on('chat', (msg) => {
     if (typeof msg !== 'string' || !msg.trim()) return;
     if (bot && state.status === 'online') {
-      bot.chat(msg.slice(0, 256));
-      logChat(config.botUsername, msg.slice(0, 256));
+      const text = msg.slice(0, 256);
+      bot.chat(text);
+      log('Sent chat message to the server.', 'info');
     } else {
       log('Chat message dropped: bot is not currently online.', 'warn');
     }
@@ -393,6 +598,63 @@ io.on('connection', (socket) => {
   socket.on('start', () => startBot());
   socket.on('stop', () => stopBot());
   socket.on('reconnect', () => reconnectBot());
+
+  socket.on('account:save', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const username = String(payload.username || '').trim();
+    const displayName = String(payload.displayName || '').trim();
+    const password = String(payload.password || '').trim();
+    if (!username) return;
+
+    ensureConfigShape();
+    const existing = findAccount(username);
+    if (existing) {
+      existing.displayName = displayName || existing.displayName || username;
+      if (password) existing.password = password;
+    } else {
+      config.accounts.push({ username, password, displayName: displayName || username });
+    }
+
+    if (!config.selectedAccount) config.selectedAccount = username;
+    persistConfig();
+    io.emit('accounts', {
+      accounts: getAccountSummaries(),
+      selectedAccount: config.selectedAccount,
+    });
+    log(`Saved account ${username}.`);
+  });
+
+  socket.on('account:select', (payload) => {
+    const username = typeof payload === 'string' ? payload : payload && payload.username;
+    if (!username) return;
+    switchAccount(username);
+    io.emit('accounts', {
+      accounts: getAccountSummaries(),
+      selectedAccount: config.selectedAccount,
+    });
+  });
+
+  socket.on('account:delete', (payload) => {
+    const username = typeof payload === 'string' ? payload : payload && payload.username;
+    if (!username) return;
+
+    ensureConfigShape();
+    const normalized = String(username).trim().toLowerCase();
+    config.accounts = config.accounts.filter((account) => String(account.username || '').trim().toLowerCase() !== normalized);
+
+    if (!config.accounts.length) {
+      config.selectedAccount = null;
+    } else if (!findAccount(config.selectedAccount)) {
+      config.selectedAccount = config.accounts[0].username;
+    }
+
+    persistConfig();
+    io.emit('accounts', {
+      accounts: getAccountSummaries(),
+      selectedAccount: config.selectedAccount,
+    });
+    log(`Removed account ${username}.`);
+  });
 });
 
 // REST fallback, handy for scripts/monitoring tools that aren't using sockets.
@@ -403,6 +665,12 @@ app.get('/api/state', (req, res) => {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+const cliArgs = parseCliArgs(process.argv.slice(2));
+activeAccount = resolveActiveAccount(cliArgs.username);
+if (activeAccount) {
+  log(`Active account resolved to ${activeAccount.username}.`);
+}
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {

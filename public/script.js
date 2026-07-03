@@ -20,6 +20,13 @@ const statMotd = el('statMotd');
 const btnStart = el('btnStart');
 const btnStop = el('btnStop');
 const btnReconnect = el('btnReconnect');
+const btnSwitchAccount = el('btnSwitchAccount');
+const accountSelect = el('accountSelect');
+const accountForm = el('accountForm');
+const accountDisplayNameInput = el('accountDisplayNameInput');
+const accountUsernameInput = el('accountUsernameInput');
+const accountPasswordInput = el('accountPasswordInput');
+const accountList = el('accountList');
 
 const tabs = Array.from(document.querySelectorAll('.tab'));
 const views = {
@@ -42,6 +49,7 @@ const chatInput = el('chatInput');
 const buffers = { console: [], chat: [], errors: [], history: [] };
 let activeTab = 'console';
 let errorCount = 0;
+let accountState = { accounts: [], selectedAccount: null };
 
 // ---------------------------------------------------------------------
 // Rendering helpers
@@ -190,7 +198,8 @@ function formatBytes(bytes) {
 }
 
 function applyState(state) {
-  currentBotUsername = state.config ? state.config.botUsername : currentBotUsername;
+  const activeUsername = state.config && state.config.selectedAccount ? state.config.selectedAccount : currentBotUsername;
+  currentBotUsername = activeUsername;
 
   signal.dataset.state = state.status;
   statusPill.dataset.state = state.status;
@@ -199,7 +208,8 @@ function applyState(state) {
   uptimeEl.textContent = state.status === 'online' ? formatUptime(state.uptimeMs) : '';
 
   if (state.config) {
-    serverLabel.textContent = `${state.config.serverHost}:${state.config.serverPort}  ·  ${state.config.botUsername}`;
+    const selectedAccount = state.config.selectedAccount || (state.config.accounts && state.config.accounts[0] && state.config.accounts[0].username) || 'unknown';
+    serverLabel.textContent = `${state.config.serverHost}:${state.config.serverPort}  ·  ${selectedAccount}`;
   }
 
   statPlayers.textContent = state.playerCount ?? 0;
@@ -210,6 +220,46 @@ function applyState(state) {
 
   btnStart.disabled = state.status !== 'stopped';
   btnStop.disabled = state.status === 'stopped';
+}
+
+function renderAccounts() {
+  accountSelect.innerHTML = '';
+  accountList.innerHTML = '';
+
+  if (!accountState.accounts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'No accounts stored yet.';
+    accountList.appendChild(empty);
+    return;
+  }
+
+  accountState.accounts.forEach((account) => {
+    const option = document.createElement('option');
+    option.value = account.username;
+    option.textContent = account.displayName || account.username;
+    option.selected = account.username === accountState.selectedAccount;
+    accountSelect.appendChild(option);
+
+    const item = document.createElement('div');
+    item.className = `account-item${account.username === accountState.selectedAccount ? ' active' : ''}`;
+    item.innerHTML = `
+      <div class="account-item__meta">
+        <span class="account-item__name">${account.displayName || account.username}</span>
+        <span class="account-item__user">${account.username}</span>
+      </div>
+      <div class="account-item__buttons">
+        <button class="btn" data-action="select" data-username="${account.username}" type="button">Use</button>
+        <button class="btn" data-action="delete" data-username="${account.username}" type="button">Delete</button>
+      </div>
+    `;
+    accountList.appendChild(item);
+  });
+}
+
+function updateAccountState(payload) {
+  accountState = payload || { accounts: [], selectedAccount: null };
+  renderAccounts();
 }
 
 // ---------------------------------------------------------------------
@@ -223,6 +273,7 @@ socket.on('init', (payload) => {
   errorCount = buffers.errors.length;
   errorBadge.hidden = errorCount === 0;
   errorBadge.textContent = errorCount;
+  if (payload.accounts) updateAccountState(payload.accounts);
   applyState(payload.state);
   renderView('console');
   renderView('chat');
@@ -231,6 +282,7 @@ socket.on('init', (payload) => {
 });
 
 socket.on('status', (state) => applyState(state));
+socket.on('accounts', (payload) => updateAccountState(payload));
 socket.on('stats', (payload) => {
   applyState(payload);
   statMemory.textContent = payload.memory ? formatBytes(payload.memory.rss) : '—';
@@ -260,6 +312,39 @@ socket.on('disconnect', () => {
 btnStart.addEventListener('click', () => socket.emit('start'));
 btnStop.addEventListener('click', () => socket.emit('stop'));
 btnReconnect.addEventListener('click', () => socket.emit('reconnect'));
+btnSwitchAccount.addEventListener('click', () => {
+  if (!accountSelect.value) return;
+  socket.emit('account:select', accountSelect.value);
+});
+
+accountForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const payload = {
+    displayName: accountDisplayNameInput.value.trim(),
+    username: accountUsernameInput.value.trim(),
+    password: accountPasswordInput.value.trim(),
+  };
+  if (!payload.username) return;
+  socket.emit('account:save', payload);
+  accountForm.reset();
+});
+
+accountList.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const action = button.dataset.action;
+  const username = button.dataset.username;
+  if (!username) return;
+  if (action === 'select') {
+    socket.emit('account:select', username);
+  } else if (action === 'delete') {
+    socket.emit('account:delete', username);
+  }
+});
+
+accountSelect.addEventListener('change', () => {
+  if (accountSelect.value) socket.emit('account:select', accountSelect.value);
+});
 
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
