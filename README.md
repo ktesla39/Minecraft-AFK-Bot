@@ -10,17 +10,8 @@ npm install
 
 Edit `config.json`:
 
-```json
-{
-  "serverHost": "example.aternos.me",
-  "serverPort": 25565,
-  "botUsername": "AFKBot",
-  "pass": "password",
-  "botChunk": 4
-}
-```
 
-`pass` is only used for online-mode authentication and is never written to logs, the dashboard, or the `/api/state` endpoint.
+`pass` is only used for online-mode authentication and is never written to logs, the dashboard, or the `/api/state` endpoint. It can be used for multiple accounts!
 
 Run it:
 

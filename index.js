@@ -428,10 +428,30 @@ function connectBot() {
     log('Bot spawned and is now online.');
     logHistory('online', `Connected as ${activeAccount.displayName || activeAccount.username}`);
 
-    if (activeAccount && activeAccount.password) {
-      currentBot.chat(`/login ${activeAccount.password}`);
-      log(`Sent login command for ${activeAccount.username}.`);
-    }
+    const account = activeAccount;
+    const loginDelayMs = 1_200;
+    const sitDelayMs = 1_000;
+
+    setTimeout(() => {
+      if (!bot || bot !== currentBot) return;
+
+      if (account && account.password) {
+        currentBot.chat(`/login ${account.password}`);
+        log(`Sent /login for ${account.username}.`);
+      }
+
+      setTimeout(() => {
+        if (!bot || bot !== currentBot) return;
+        currentBot.chat('/sit');
+        log(`Sent /sit for ${account.username}.`);
+
+        setTimeout(() => {
+          if (!bot || bot !== currentBot) return;
+          currentBot.chat('/afk');
+          log(`Sent /afk for ${account.username}.`);
+        }, sitDelayMs);
+      }, loginDelayMs);
+    }, 800);
   });
 
   currentBot.on('messagestr', (message, position, _jsonMsg, sender) => {

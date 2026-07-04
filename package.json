@@ -1,15 +1,23 @@
 {
-  "name": "mineflayer-dashboard",
+  "name": "afkbot",
   "version": "1.0.0",
   "description": "Self-healing Mineflayer AFK bot with a real-time web dashboard for status, chat, logs, and remote control.",
   "main": "index.js",
+  "bin": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "build": "pkg . --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path build"
   },
   "dependencies": {
     "express": "^4.21.2",
     "mineflayer": "^4.20.1",
     "minecraft-protocol": "^1.47.0",
     "socket.io": "^4.8.1"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "config.json"
+    ]
   }
 }
