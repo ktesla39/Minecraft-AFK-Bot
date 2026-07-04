@@ -121,6 +121,11 @@ function parseCliArgs(argv) {
       result.username = arg.split('=').slice(1).join('=');
     } else if (arg.startsWith('--username=')) {
       result.username = arg.split('=').slice(1).join('=');
+    } else if (arg === '--port') {
+      result.port = argv[i + 1] || null;
+      i += 1;
+    } else if (arg.startsWith('--port=')) {
+      result.port = arg.split('=').slice(1).join('=');
     }
   }
   return result;
@@ -245,6 +250,43 @@ function logChat(username, message) {
   const entry = { time: nowIso(), username: resolveUsername(username, message), message };
   pushCapped(chat, entry, MAX_CHAT_ENTRIES);
   io.emit('chat', entry);
+}
+
+function toMessageText(message, jsonMsg) {
+  if (typeof message === 'string' && message) return message;
+  if (typeof message === 'object' && message) {
+    if (typeof message.toString === 'function' && message.toString !== Object.prototype.toString) {
+      const rendered = message.toString();
+      if (rendered && rendered !== '[object Object]') return rendered;
+    }
+
+    if (typeof message.text === 'string' && message.text) return message.text;
+    if (Array.isArray(message.extra)) {
+      const joined = message.extra.map((part) => part && typeof part.text === 'string' ? part.text : '').join('');
+      if (joined) return joined;
+    }
+  }
+
+  if (jsonMsg && typeof jsonMsg === 'object') {
+    if (typeof jsonMsg.text === 'string' && jsonMsg.text) return jsonMsg.text;
+    if (Array.isArray(jsonMsg.extra)) {
+      const joined = jsonMsg.extra.map((part) => part && typeof part.text === 'string' ? part.text : '').join('');
+      if (joined) return joined;
+    }
+  }
+
+  return null;
+}
+
+function shouldLogIncomingMessage(position, sender) {
+  return Boolean(position) && ['chat', 'system', 'game_info', 'action_bar'].includes(position) || Boolean(sender);
+}
+
+function handleIncomingMessage(message, position, jsonMsg, sender) {
+  const text = toMessageText(message, jsonMsg);
+  if (!text) return;
+  if (!shouldLogIncomingMessage(position, sender)) return;
+  logChat(sender, text);
 }
 
 function logHistory(event, detail) {
@@ -454,11 +496,8 @@ function connectBot() {
     }, 800);
   });
 
-  currentBot.on('messagestr', (message, position, _jsonMsg, sender) => {
-    if (!message) return;
-    if (position === 'chat' || sender) {
-      logChat(sender, message);
-    }
+  currentBot.on('messagestr', (message, position, jsonMsg, sender) => {
+    handleIncomingMessage(message, position, jsonMsg, sender);
   });
 
   currentBot.on('playerJoined', () => {
@@ -692,7 +731,7 @@ if (activeAccount) {
   log(`Active account resolved to ${activeAccount.username}.`);
 }
 
-const PORT = process.env.PORT || 8080;
+const PORT = Number(cliArgs.port || process.env.PORT || 8080);
 server.listen(PORT, () => {
   log(`Dashboard listening on port ${PORT}`);
   startBot();

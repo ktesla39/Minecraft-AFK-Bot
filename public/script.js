@@ -201,9 +201,13 @@ function applyState(state) {
   const activeUsername = state.config && state.config.selectedAccount ? state.config.selectedAccount : currentBotUsername;
   currentBotUsername = activeUsername;
 
+  const activeBotName = activeUsername || 'Mineflayer Bot';
+  document.title = `${activeBotName} | Mineflayer Dashboard`;
+
   signal.dataset.state = state.status;
   statusPill.dataset.state = state.status;
   statusPill.textContent = STATUS_LABELS[state.status] || state.status;
+  document.getElementById('sessionCount').textContent = `${state.sessions ? state.sessions.length : 0} bot${state.sessions && state.sessions.length === 1 ? '' : 's'}`;
 
   uptimeEl.textContent = state.status === 'online' ? formatUptime(state.uptimeMs) : '';
 

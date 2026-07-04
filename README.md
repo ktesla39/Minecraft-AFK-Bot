@@ -18,8 +18,13 @@ Run it:
 ```bash
 npm start
 ```
+or,
 
-Then open `http://localhost:8080` (or `PORT=xxxx npm start` to pick a different port).
+```bash
+node index.js --user <username>
+```
+
+Then open `http://localhost:8080` (or `node index --port <xxxx>` to pick a different port).
 
 ## Reconnect behavior
 

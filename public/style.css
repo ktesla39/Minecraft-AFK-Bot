@@ -145,6 +145,15 @@ button, input{ font-family: inherit; }
   align-items: center;
   gap: 12px;
 }
+.session-pill{
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fog);
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+}
 .status-pill{
   font-family: var(--font-mono);
   font-size: 12px;
