@@ -5,19 +5,12 @@
   "main": "index.js",
   "bin": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "build": "pkg . --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path build"
+    "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.21.2",
     "mineflayer": "^4.20.1",
     "minecraft-protocol": "^1.47.0",
     "socket.io": "^4.8.1"
-  },
-  "pkg": {
-    "assets": [
-      "public/**/*",
-      "config.json"
-    ]
   }
 }
