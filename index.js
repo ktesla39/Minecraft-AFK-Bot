@@ -1,45 +1,45 @@
-// Mineflayer Dashboard — server
-//
-// Runs a mineflayer bot with a resilient, indefinite reconnect strategy and
-// exposes a real-time web dashboard (status, stats, chat, logs, history)
-// over Socket.IO, plus start/stop/reconnect controls that never require
-// restarting the Node process.
+const express = require("express");
+const http = require("http");
+const fs = require("fs");
+const { Server } = require("socket.io");
+const mineflayer = require("mineflayer");
+const mcProtocol = require("minecraft-protocol");
+const path = require("path");
 
-const express = require('express');
-const http = require('http');
-const fs = require('fs');
-const { Server } = require('socket.io');
-const mineflayer = require('mineflayer');
-const mcProtocol = require('minecraft-protocol');
-const path = require('path');
-
-const config = require('./config.json');
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+const config = require("./config.json");
+const CONFIG_PATH = path.join(__dirname, "config.json");
 
 // ---------------------------------------------------------------------------
 // Config / constants
 // ---------------------------------------------------------------------------
 
-const RETRY_WAIT_MS = 10_000;      // wait after any connection failure
-const PING_INTERVAL_MS = 20_000;   // how often to probe the server while it's down
-const PING_TIMEOUT_MS = 5_000;     // give up on a single ping probe after this long
-const STATS_INTERVAL_MS = 3_000;   // how often to push live stats to clients
-const MAX_LOG_ENTRIES = 500;       // cap in-memory log buffers so memory stays bounded
+const RETRY_WAIT_MS = 30_000; // wait after any connection failure
+const PING_INTERVAL_MS = 35_000; // how often to probe the server while it's down
+const PING_TIMEOUT_MS = 5_000; // give up on a single ping probe after this long
+const STATS_INTERVAL_MS = 3_000; // how often to push live stats to clients
+const MAX_LOG_ENTRIES = 500; // cap in-memory log buffers so memory stays bounded
 const MAX_CHAT_ENTRIES = 500;
 const MAX_HISTORY_ENTRIES = 200;
 
 // Fields from config.json that are safe to expose to the dashboard/client.
 // Anything not in this list (passwords, tokens, etc.) is never sent or logged.
-const SAFE_CONFIG_FIELDS = ['serverHost', 'serverPort', 'botChunk', 'selectedAccount'];
+const SAFE_CONFIG_FIELDS = [
+  "serverHost",
+  "serverPort",
+  "botChunk",
+  "selectedAccount",
+];
 
 function ensureConfigShape() {
   if (!Array.isArray(config.accounts)) config.accounts = [];
   config.accounts = config.accounts
     .filter(Boolean)
     .map((account) => {
-      const username = String(account.username || account.name || '').trim();
-      const displayName = String(account.displayName || account.name || username).trim();
-      const password = String(account.password || account.pass || '').trim();
+      const username = String(account.username || account.name || "").trim();
+      const displayName = String(
+        account.displayName || account.name || username,
+      ).trim();
+      const password = String(account.password || account.pass || "").trim();
       return { username, password, displayName: displayName || username };
     })
     .filter((account) => account.username);
@@ -49,7 +49,11 @@ function ensureConfigShape() {
   }
 
   if (!config.accounts.length) {
-    const fallback = { username: 'DontCare', password: '', displayName: 'Default' };
+    const fallback = {
+      username: "DontCare",
+      password: "",
+      displayName: "Default",
+    };
     config.accounts.push(fallback);
     config.selectedAccount = fallback.username;
   }
@@ -71,9 +75,18 @@ function getAccountSummaries() {
 
 function findAccount(username) {
   ensureConfigShape();
-  const normalized = String(username || '').trim().toLowerCase();
+  const normalized = String(username || "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return null;
-  return config.accounts.find((account) => String(account.username || '').trim().toLowerCase() === normalized) || null;
+  return (
+    config.accounts.find(
+      (account) =>
+        String(account.username || "")
+          .trim()
+          .toLowerCase() === normalized,
+    ) || null
+  );
 }
 
 function resolveActiveAccount(requestedUsername) {
@@ -85,7 +98,8 @@ function resolveActiveAccount(requestedUsername) {
     return explicit;
   }
 
-  const selected = findAccount(config.selectedAccount) || config.accounts[0] || null;
+  const selected =
+    findAccount(config.selectedAccount) || config.accounts[0] || null;
   if (selected) {
     config.selectedAccount = selected.username;
     persistConfig();
@@ -114,18 +128,18 @@ function parseCliArgs(argv) {
   const result = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '--user' || arg === '--username') {
+    if (arg === "--user" || arg === "--username") {
       result.username = argv[i + 1] || null;
       i += 1;
-    } else if (arg.startsWith('--user=')) {
-      result.username = arg.split('=').slice(1).join('=');
-    } else if (arg.startsWith('--username=')) {
-      result.username = arg.split('=').slice(1).join('=');
-    } else if (arg === '--port') {
+    } else if (arg.startsWith("--user=")) {
+      result.username = arg.split("=").slice(1).join("=");
+    } else if (arg.startsWith("--username=")) {
+      result.username = arg.split("=").slice(1).join("=");
+    } else if (arg === "--port") {
       result.port = argv[i + 1] || null;
       i += 1;
-    } else if (arg.startsWith('--port=')) {
-      result.port = arg.split('=').slice(1).join('=');
+    } else if (arg.startsWith("--port=")) {
+      result.port = arg.split("=").slice(1).join("=");
     }
   }
   return result;
@@ -139,7 +153,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
@@ -147,14 +161,14 @@ app.use(express.json());
 // ---------------------------------------------------------------------------
 
 const state = {
-  status: 'stopped',        // stopped | connecting | pinging | online | waiting
-  autoReconnect: false,     // whether the reconnect loop should keep running
-  reconnectAttempts: 0,     // attempts since the last successful spawn
+  status: "stopped", // stopped | connecting | pinging | online | waiting
+  autoReconnect: false, // whether the reconnect loop should keep running
+  reconnectAttempts: 0, // attempts since the last successful spawn
   lastError: null,
-  connectedAt: null,        // Date.now() of last successful spawn
+  connectedAt: null, // Date.now() of last successful spawn
   motd: null,
-  players: [],              // usernames currently visible to the bot
-  ping: null,                // bot's latency to the server, ms
+  players: [], // usernames currently visible to the bot
+  ping: null, // bot's latency to the server, ms
 };
 
 let bot = null;
@@ -164,10 +178,11 @@ let statsTimer = null;
 let pingProbeInFlight = false;
 let activeAccount = null;
 
-const logs = [];      // general console/event log
-const chat = [];       // server chat messages
-const errors = [];     // error-level events
-const history = [];    // connection lifecycle + reconnect attempt history
+const logs = []; // general console/event log
+const chat = []; // server chat messages
+const errors = []; // error-level events
+const history = []; // connection lifecycle + reconnect attempt history
+const playerNameCache = new Map();
 
 function pushCapped(arr, entry, max) {
   arr.push(entry);
@@ -178,68 +193,95 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function log(message, level = 'info') {
+function emitToClients(event, payload) {
+  if (io.engine && io.engine.clientsCount > 0) {
+    io.emit(event, payload);
+  }
+}
+
+function log(message, level = "info") {
   const entry = { time: nowIso(), level, message };
   pushCapped(logs, entry, MAX_LOG_ENTRIES);
-  io.emit('log', entry);
+  emitToClients("log", entry);
   // Mirror to the real console too, still without ever including secrets.
   const line = `[${entry.time}] [${level}] ${message}`;
-  if (level === 'error') console.error(line);
+  if (level === "error") console.error(line);
   else console.log(line);
 }
 
 function logError(message, err) {
-  const detail = err && err.message ? err.message : String(err || '');
+  const detail = err && err.message ? err.message : String(err || "");
   const entry = { time: nowIso(), message, detail };
   pushCapped(errors, entry, MAX_LOG_ENTRIES);
   state.lastError = entry;
-  io.emit('error-log', entry);
-  log(`${message}${detail ? ': ' + detail : ''}`, 'error');
+  emitToClients("error-log", entry);
+  log(`${message}${detail ? ": " + detail : ""}`, "error");
 }
 
 function normalizeUsername(value) {
   if (!value) return null;
-  if (typeof value === 'string') return value.trim() || null;
-  if (typeof value === 'object') {
-    return value.username || value.name || value.displayName || value.nick || value.text || null;
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value === "object") {
+    return (
+      value.username ||
+      value.name ||
+      value.displayName ||
+      value.nick ||
+      value.text ||
+      null
+    );
   }
   const text = String(value).trim();
   return text || null;
 }
 
 function looksLikeUuid(value) {
-  if (typeof value !== 'string') return false;
-  const normalized = value.replace(/-/g, '');
+  if (typeof value !== "string") return false;
+  const normalized = value.replace(/-/g, "");
   return /^[0-9a-f]{32}$/i.test(normalized);
+}
+
+function normalizeUuid(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/-/g, "");
+  return normalized.length === 32 ? normalized.toLowerCase() : null;
+}
+
+function rebuildPlayerNameCache() {
+  playerNameCache.clear();
+  if (!bot || !bot.players) return;
+  Object.values(bot.players).forEach((player) => {
+    const uuid = normalizeUuid(
+      player && (player.uuid || player.id || player.uuidRaw),
+    );
+    const username = normalizeUsername(
+      player && (player.username || player.name),
+    );
+    if (uuid && username) playerNameCache.set(uuid, username);
+  });
 }
 
 function resolveUsername(sender, fallbackMessage) {
   const direct = normalizeUsername(sender);
   if (direct && !looksLikeUuid(direct)) return direct;
 
-  if (sender && typeof sender === 'object' && bot) {
-    const uuid = sender.uuid || sender.id || sender.playerUUID;
+  if (sender && typeof sender === "object" && bot) {
+    const uuid = normalizeUuid(sender.uuid || sender.id || sender.playerUUID);
     if (uuid) {
-      const match = Object.values(bot.players || {}).find((player) => {
-        const playerUuid = player && (player.uuid || player.id || player.uuidRaw);
-        if (!playerUuid) return false;
-        return String(playerUuid).replace(/-/g, '') === String(uuid).replace(/-/g, '');
-      });
-      if (match && match.username) return match.username;
+      const cached = playerNameCache.get(uuid);
+      if (cached) return cached;
     }
   }
 
   if (bot && looksLikeUuid(direct)) {
-    const match = Object.values(bot.players || {}).find((player) => {
-      const playerUuid = player && (player.uuid || player.id || player.uuidRaw);
-      if (!playerUuid) return false;
-      return String(playerUuid).replace(/-/g, '') === direct.replace(/-/g, '');
-    });
-    if (match && match.username) return match.username;
+    const cached = playerNameCache.get(normalizeUuid(direct));
+    if (cached) return cached;
   }
 
-  if (typeof fallbackMessage === 'string') {
-    const match = fallbackMessage.match(/^(?:<([^>]+)>|(?:\[(.*?)\]\s*)?([A-Za-z0-9_]{1,16})\s?[>:\-»\]\)~]+\s)(.*)$/);
+  if (typeof fallbackMessage === "string") {
+    const match = fallbackMessage.match(
+      /^(?:<([^>]+)>|(?:\[(.*?)\]\s*)?([A-Za-z0-9_]{1,16})\s?[>:\-»\]\)~]+\s)(.*)$/,
+    );
     if (match && (match[1] || match[3])) return match[1] || match[3];
   }
 
@@ -247,30 +289,41 @@ function resolveUsername(sender, fallbackMessage) {
 }
 
 function logChat(username, message) {
-  const entry = { time: nowIso(), username: resolveUsername(username, message), message };
+  const entry = {
+    time: nowIso(),
+    username: resolveUsername(username, message),
+    message,
+  };
   pushCapped(chat, entry, MAX_CHAT_ENTRIES);
-  io.emit('chat', entry);
+  emitToClients("chat", entry);
 }
 
 function toMessageText(message, jsonMsg) {
-  if (typeof message === 'string' && message) return message;
-  if (typeof message === 'object' && message) {
-    if (typeof message.toString === 'function' && message.toString !== Object.prototype.toString) {
+  if (typeof message === "string" && message) return message;
+  if (typeof message === "object" && message) {
+    if (
+      typeof message.toString === "function" &&
+      message.toString !== Object.prototype.toString
+    ) {
       const rendered = message.toString();
-      if (rendered && rendered !== '[object Object]') return rendered;
+      if (rendered && rendered !== "[object Object]") return rendered;
     }
 
-    if (typeof message.text === 'string' && message.text) return message.text;
+    if (typeof message.text === "string" && message.text) return message.text;
     if (Array.isArray(message.extra)) {
-      const joined = message.extra.map((part) => part && typeof part.text === 'string' ? part.text : '').join('');
+      const joined = message.extra
+        .map((part) => (part && typeof part.text === "string" ? part.text : ""))
+        .join("");
       if (joined) return joined;
     }
   }
 
-  if (jsonMsg && typeof jsonMsg === 'object') {
-    if (typeof jsonMsg.text === 'string' && jsonMsg.text) return jsonMsg.text;
+  if (jsonMsg && typeof jsonMsg === "object") {
+    if (typeof jsonMsg.text === "string" && jsonMsg.text) return jsonMsg.text;
     if (Array.isArray(jsonMsg.extra)) {
-      const joined = jsonMsg.extra.map((part) => part && typeof part.text === 'string' ? part.text : '').join('');
+      const joined = jsonMsg.extra
+        .map((part) => (part && typeof part.text === "string" ? part.text : ""))
+        .join("");
       if (joined) return joined;
     }
   }
@@ -279,7 +332,11 @@ function toMessageText(message, jsonMsg) {
 }
 
 function shouldLogIncomingMessage(position, sender) {
-  return Boolean(position) && ['chat', 'system', 'game_info', 'action_bar'].includes(position) || Boolean(sender);
+  return (
+    (Boolean(position) &&
+      ["chat", "system", "game_info", "action_bar"].includes(position)) ||
+    Boolean(sender)
+  );
 }
 
 function handleIncomingMessage(message, position, jsonMsg, sender) {
@@ -292,12 +349,13 @@ function handleIncomingMessage(message, position, jsonMsg, sender) {
 function logHistory(event, detail) {
   const entry = { time: nowIso(), event, detail: detail || null };
   pushCapped(history, entry, MAX_HISTORY_ENTRIES);
-  io.emit('history', entry);
+  emitToClients("history", entry);
 }
 
 function setStatus(next) {
+  if (state.status === next) return;
   state.status = next;
-  io.emit('status', publicState());
+  emitToClients("status", publicState());
 }
 
 function publicState() {
@@ -322,8 +380,14 @@ function publicState() {
 // ---------------------------------------------------------------------------
 
 function clearAllTimers() {
-  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  if (pingTimer) {
+    clearTimeout(pingTimer);
+    pingTimer = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,10 +400,11 @@ function probeServer() {
   return Promise.race([
     mcProtocol.ping({ host: config.serverHost, port: config.serverPort }),
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('ping timed out')), PING_TIMEOUT_MS)
+      setTimeout(() => reject(new Error("ping timed out")), PING_TIMEOUT_MS),
     ),
-  ])
-    .finally(() => { pingProbeInFlight = false; });
+  ]).finally(() => {
+    pingProbeInFlight = false;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -355,8 +420,10 @@ function probeServer() {
 function scheduleReconnect(reason) {
   if (!state.autoReconnect) return;
   clearAllTimers();
-  setStatus('waiting');
-  log(`Disconnected (${reason}). Waiting ${RETRY_WAIT_MS / 1000}s before checking server availability...`);
+  setStatus("waiting");
+  log(
+    `Disconnected (${reason}). Waiting ${RETRY_WAIT_MS / 1000}s before checking server availability...`,
+  );
   retryTimer = setTimeout(() => {
     startPingLoop();
   }, RETRY_WAIT_MS);
@@ -364,7 +431,7 @@ function scheduleReconnect(reason) {
 
 function startPingLoop() {
   if (!state.autoReconnect) return;
-  setStatus('pinging');
+  setStatus("pinging");
   const attemptPing = () => {
     if (!state.autoReconnect) return;
     probeServer()
@@ -373,13 +440,15 @@ function startPingLoop() {
         if (res && res.description !== undefined) {
           state.motd = motdToString(res.description);
         }
-        log('Server responded to ping. Attempting to reconnect...');
-        logHistory('server-online', 'Ping succeeded, reconnecting');
+        log("Server responded to ping. Attempting to reconnect...");
+        logHistory("server-online", "Ping succeeded, reconnecting");
         connectBot();
       })
       .catch(() => {
         if (!state.autoReconnect) return;
-        log(`Server still unreachable, retrying ping in ${PING_INTERVAL_MS / 1000}s...`);
+        log(
+          `Server still unreachable, retrying ping in ${PING_INTERVAL_MS / 1000}s...`,
+        );
         pingTimer = setTimeout(attemptPing, PING_INTERVAL_MS);
       });
   };
@@ -387,58 +456,73 @@ function startPingLoop() {
 }
 
 function motdToString(description) {
-  if (typeof description === 'string') return description;
-  if (description && typeof description.text === 'string') {
+  if (typeof description === "string") return description;
+  if (description && typeof description.text === "string") {
     let text = description.text;
     if (Array.isArray(description.extra)) {
-      text += description.extra.map((e) => e.text || '').join('');
+      text += description.extra.map((e) => e.text || "").join("");
     }
     return text;
   }
-  try { return JSON.stringify(description); } catch { return null; }
+  try {
+    return JSON.stringify(description);
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Bot lifecycle
 // ---------------------------------------------------------------------------
 
-function disconnectBot(reason = 'disconnect') {
+function disconnectBot(reason = "disconnect") {
   if (!bot) return;
 
   const currentBot = bot;
   bot = null;
 
   try {
-    if (typeof currentBot.end === 'function') {
+    if (typeof currentBot.end === "function") {
       currentBot.end(reason);
-    } else if (typeof currentBot.quit === 'function') {
+    } else if (typeof currentBot.quit === "function") {
       currentBot.quit(reason);
-    } else if (currentBot._client && typeof currentBot._client.end === 'function') {
+    } else if (
+      currentBot._client &&
+      typeof currentBot._client.end === "function"
+    ) {
       currentBot._client.end(reason);
     } else {
-      throw new Error('No disconnect method available for this bot instance.');
+      throw new Error("No disconnect method available for this bot instance.");
     }
   } catch (err) {
-    logError('Error while stopping bot', err);
+    logError("Error while stopping bot", err);
   }
 }
 
 function connectBot() {
   if (bot) return; // already connecting/connected
   clearAllTimers();
-  setStatus('connecting');
+  setStatus("connecting");
   state.reconnectAttempts += 1;
 
   activeAccount = resolveActiveAccount();
   if (!activeAccount) {
-    logError('No bot account is configured. Add one from the dashboard or config.json.', new Error('missing-account'));
+    logError(
+      "No bot account is configured. Add one from the dashboard or config.json.",
+      new Error("missing-account"),
+    );
     state.autoReconnect = false;
-    setStatus('stopped');
+    setStatus("stopped");
     return;
   }
 
-  logHistory('connect-attempt', `Attempt #${state.reconnectAttempts} for ${activeAccount.username}`);
-  log(`Connecting to ${config.serverHost}:${config.serverPort} as ${activeAccount.username}...`);
+  logHistory(
+    "connect-attempt",
+    `Attempt #${state.reconnectAttempts} for ${activeAccount.username}`,
+  );
+  log(
+    `Connecting to ${config.serverHost}:${config.serverPort} as ${activeAccount.username}...`,
+  );
 
   try {
     const createdBot = mineflayer.createBot({
@@ -446,7 +530,7 @@ function connectBot() {
       port: config.serverPort,
       username: activeAccount.username,
       password: activeAccount.password || undefined,
-      auth: 'offline',
+      auth: "offline",
       version: false,
       viewDistance: config.botChunk,
       hideErrors: true,
@@ -455,24 +539,30 @@ function connectBot() {
     bot = createdBot;
   } catch (err) {
     bot = null;
-    logError('Failed to create bot', err);
-    scheduleReconnect('create-bot-failed');
+    logError("Failed to create bot", err);
+    scheduleReconnect("create-bot-failed");
     return;
   }
 
   const currentBot = bot;
 
-  currentBot.on('spawn', () => {
+  currentBot.on("spawn", () => {
     state.connectedAt = Date.now();
     state.reconnectAttempts = 0;
-    state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
-    setStatus('online');
-    log('Bot spawned and is now online.');
-    logHistory('online', `Connected as ${activeAccount.displayName || activeAccount.username}`);
+    state.players = Object.keys(currentBot.players).filter(
+      (p) => p !== currentBot.username,
+    );
+    rebuildPlayerNameCache();
+    setStatus("online");
+    log("Bot spawned and is now online.");
+    logHistory(
+      "online",
+      `Connected as ${activeAccount.displayName || activeAccount.username}`,
+    );
 
     const account = activeAccount;
     const loginDelayMs = 1_200;
-    const sitDelayMs = 1_000;
+    const afkDelayMs = 1_000;
 
     setTimeout(() => {
       if (!bot || bot !== currentBot) return;
@@ -484,83 +574,97 @@ function connectBot() {
 
       setTimeout(() => {
         if (!bot || bot !== currentBot) return;
-        currentBot.chat('/sit');
-        log(`Sent /sit for ${account.username}.`);
+        currentBot.chat("/warp CitizenAFK");
+        log(`Sent /warp CitizenAFK for ${account.username}.`);
 
         setTimeout(() => {
           if (!bot || bot !== currentBot) return;
-          currentBot.chat('/afk');
+          currentBot.chat("/afk");
           log(`Sent /afk for ${account.username}.`);
-        }, sitDelayMs);
+        }, afkDelayMs);
       }, loginDelayMs);
     }, 800);
   });
 
-  currentBot.on('messagestr', (message, position, jsonMsg, sender) => {
+  currentBot.on("messagestr", (message, position, jsonMsg, sender) => {
     handleIncomingMessage(message, position, jsonMsg, sender);
   });
 
-  currentBot.on('playerJoined', () => {
-    if (bot === currentBot) state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
+  currentBot.on("playerJoined", () => {
+    if (bot === currentBot) {
+      state.players = Object.keys(currentBot.players).filter(
+        (p) => p !== currentBot.username,
+      );
+      rebuildPlayerNameCache();
+    }
   });
 
-  currentBot.on('playerLeft', () => {
-    if (bot === currentBot) state.players = Object.keys(currentBot.players).filter((p) => p !== currentBot.username);
+  currentBot.on("playerLeft", () => {
+    if (bot === currentBot) {
+      state.players = Object.keys(currentBot.players).filter(
+        (p) => p !== currentBot.username,
+      );
+      rebuildPlayerNameCache();
+    }
   });
 
-  currentBot.on('kicked', (reason) => {
+  currentBot.on("kicked", (reason) => {
     let reasonText;
     try {
-      const parsed = typeof reason === 'string' ? JSON.parse(reason) : reason;
+      const parsed = typeof reason === "string" ? JSON.parse(reason) : reason;
       reasonText = motdToString(parsed) || String(reason);
     } catch {
       reasonText = String(reason);
     }
-    logError('Bot was kicked from the server', new Error(reasonText));
-    logHistory('kicked', reasonText);
+    logError("Bot was kicked from the server", new Error(reasonText));
+    logHistory("kicked", reasonText);
   });
 
-  currentBot.on('error', (err) => {
-    logError('Bot connection error', err);
+  currentBot.on("error", (err) => {
+    logError("Bot connection error", err);
   });
 
-  currentBot.on('end', (reason) => {
+  currentBot.on("end", (reason) => {
     if (bot !== currentBot) return;
-    const wasOnline = state.status === 'online';
+    const wasOnline = state.status === "online";
     bot = null;
+    playerNameCache.clear();
     state.connectedAt = null;
     state.players = [];
     state.ping = null;
-    logHistory('disconnected', reason || (wasOnline ? 'connection ended' : 'connection failed'));
+    logHistory(
+      "disconnected",
+      reason || (wasOnline ? "connection ended" : "connection failed"),
+    );
     if (state.autoReconnect) {
-      scheduleReconnect(reason || 'connection ended');
+      scheduleReconnect(reason || "connection ended");
     } else {
-      setStatus('stopped');
-      log('Bot stopped.');
+      setStatus("stopped");
+      log("Bot stopped.");
     }
   });
 }
 
 function startBot() {
   if (state.autoReconnect && bot) {
-    log('Start requested, but the bot is already running.');
+    log("Start requested, but the bot is already running.");
     return;
   }
   state.autoReconnect = true;
   state.reconnectAttempts = 0;
-  logHistory('start', 'Start requested by user');
+  logHistory("start", "Start requested by user");
   connectBot();
 }
 
 function stopBot() {
   state.autoReconnect = false;
   clearAllTimers();
-  logHistory('stop', 'Stop requested by user');
+  logHistory("stop", "Stop requested by user");
   if (bot) {
-    log('Stopping bot...');
-    disconnectBot('stop requested');
+    log("Stopping bot...");
+    disconnectBot("stop requested");
   } else {
-    setStatus('stopped');
+    setStatus("stopped");
   }
   state.connectedAt = null;
   state.players = [];
@@ -570,11 +674,14 @@ function stopBot() {
 function switchAccount(username) {
   const account = setSelectedAccount(username);
   if (!account) {
-    logError('Unable to switch account', new Error(`Unknown account: ${username}`));
+    logError(
+      "Unable to switch account",
+      new Error(`Unknown account: ${username}`),
+    );
     return null;
   }
 
-  logHistory('account-switch', `Selected account ${account.username}`);
+  logHistory("account-switch", `Selected account ${account.username}`);
   if (bot) {
     const shouldAutoReconnect = state.autoReconnect;
     stopBot();
@@ -589,13 +696,13 @@ function switchAccount(username) {
 }
 
 function reconnectBot() {
-  logHistory('manual-reconnect', 'Reconnect requested by user');
+  logHistory("manual-reconnect", "Reconnect requested by user");
   clearAllTimers();
   state.autoReconnect = true;
   if (bot) {
-    disconnectBot('reconnect requested');
+    disconnectBot("reconnect requested");
   }
-  log('Manual reconnect requested. Reconnecting now...');
+  log("Manual reconnect requested. Reconnecting now...");
   connectBot();
 }
 
@@ -604,11 +711,12 @@ function reconnectBot() {
 // ---------------------------------------------------------------------------
 
 function broadcastStats() {
-  if (bot && bot._client && typeof bot._client.latency === 'number') {
+  if (io.engine && io.engine.clientsCount === 0) return;
+  if (bot && bot._client && typeof bot._client.latency === "number") {
     state.ping = bot._client.latency;
   }
   const mem = process.memoryUsage();
-  io.emit('stats', {
+  emitToClients("stats", {
     ...publicState(),
     memory: {
       rss: mem.rss,
@@ -624,9 +732,9 @@ statsTimer = setInterval(broadcastStats, STATS_INTERVAL_MS);
 // Socket.IO wiring
 // ---------------------------------------------------------------------------
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   // Send full current state so a freshly-opened dashboard isn't blank.
-  socket.emit('init', {
+  socket.emit("init", {
     state: publicState(),
     logs,
     chat,
@@ -638,31 +746,31 @@ io.on('connection', (socket) => {
     },
   });
 
-  socket.emit('accounts', {
+  socket.emit("accounts", {
     accounts: getAccountSummaries(),
     selectedAccount: config.selectedAccount,
   });
 
-  socket.on('chat', (msg) => {
-    if (typeof msg !== 'string' || !msg.trim()) return;
-    if (bot && state.status === 'online') {
+  socket.on("chat", (msg) => {
+    if (typeof msg !== "string" || !msg.trim()) return;
+    if (bot && state.status === "online") {
       const text = msg.slice(0, 256);
       bot.chat(text);
-      log('Sent chat message to the server.', 'info');
+      log("Sent chat message to the server.", "info");
     } else {
-      log('Chat message dropped: bot is not currently online.', 'warn');
+      log("Chat message dropped: bot is not currently online.", "warn");
     }
   });
 
-  socket.on('start', () => startBot());
-  socket.on('stop', () => stopBot());
-  socket.on('reconnect', () => reconnectBot());
+  socket.on("start", () => startBot());
+  socket.on("stop", () => stopBot());
+  socket.on("reconnect", () => reconnectBot());
 
-  socket.on('account:save', (payload) => {
-    if (!payload || typeof payload !== 'object') return;
-    const username = String(payload.username || '').trim();
-    const displayName = String(payload.displayName || '').trim();
-    const password = String(payload.password || '').trim();
+  socket.on("account:save", (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    const username = String(payload.username || "").trim();
+    const displayName = String(payload.displayName || "").trim();
+    const password = String(payload.password || "").trim();
     if (!username) return;
 
     ensureConfigShape();
@@ -671,35 +779,46 @@ io.on('connection', (socket) => {
       existing.displayName = displayName || existing.displayName || username;
       if (password) existing.password = password;
     } else {
-      config.accounts.push({ username, password, displayName: displayName || username });
+      config.accounts.push({
+        username,
+        password,
+        displayName: displayName || username,
+      });
     }
 
     if (!config.selectedAccount) config.selectedAccount = username;
     persistConfig();
-    io.emit('accounts', {
+    io.emit("accounts", {
       accounts: getAccountSummaries(),
       selectedAccount: config.selectedAccount,
     });
     log(`Saved account ${username}.`);
   });
 
-  socket.on('account:select', (payload) => {
-    const username = typeof payload === 'string' ? payload : payload && payload.username;
+  socket.on("account:select", (payload) => {
+    const username =
+      typeof payload === "string" ? payload : payload && payload.username;
     if (!username) return;
     switchAccount(username);
-    io.emit('accounts', {
+    io.emit("accounts", {
       accounts: getAccountSummaries(),
       selectedAccount: config.selectedAccount,
     });
   });
 
-  socket.on('account:delete', (payload) => {
-    const username = typeof payload === 'string' ? payload : payload && payload.username;
+  socket.on("account:delete", (payload) => {
+    const username =
+      typeof payload === "string" ? payload : payload && payload.username;
     if (!username) return;
 
     ensureConfigShape();
     const normalized = String(username).trim().toLowerCase();
-    config.accounts = config.accounts.filter((account) => String(account.username || '').trim().toLowerCase() !== normalized);
+    config.accounts = config.accounts.filter(
+      (account) =>
+        String(account.username || "")
+          .trim()
+          .toLowerCase() !== normalized,
+    );
 
     if (!config.accounts.length) {
       config.selectedAccount = null;
@@ -708,7 +827,7 @@ io.on('connection', (socket) => {
     }
 
     persistConfig();
-    io.emit('accounts', {
+    io.emit("accounts", {
       accounts: getAccountSummaries(),
       selectedAccount: config.selectedAccount,
     });
@@ -717,7 +836,7 @@ io.on('connection', (socket) => {
 });
 
 // REST fallback, handy for scripts/monitoring tools that aren't using sockets.
-app.get('/api/state', (req, res) => {
+app.get("/api/state", (req, res) => {
   res.json({ state: publicState(), logs, chat, errors, history });
 });
 
@@ -737,8 +856,8 @@ server.listen(PORT, () => {
   startBot();
 });
 
-process.on('SIGINT', () => {
-  log('Shutting down...');
+process.on("SIGINT", () => {
+  log("Shutting down...");
   stopBot();
   clearInterval(statsTimer);
   server.close(() => process.exit(0));
